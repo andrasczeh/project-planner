@@ -7,8 +7,13 @@ import { computeSyncPlan, executeSyncPlan, type SyncPlan } from '../../sync/engi
 import { storeSecret, getSecret, deleteSecret } from '../../sync/secrets';
 import type { RecordDiff } from '../../sync/diff';
 import type { ProviderConfig } from '../../sync/types';
+import type { ID } from '../../types';
 
-export function SyncPanel() {
+interface Props {
+  projectId?: ID;
+}
+
+export function SyncPanel({ projectId }: Props) {
   const { showToast } = useToast();
   const [configOpen, setConfigOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -20,23 +25,30 @@ export function SyncPanel() {
   const [token, setToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
 
+  const configKey = projectId ? `github:${projectId}` : 'github';
+  const tokenKey = `${configKey}:token`;
+  const repoKey = `${configKey}:repo`;
+
   useEffect(() => {
-    getSecret('github:token').then(t => setHasToken(!!t));
-  }, []);
+    getSecret(tokenKey).then(t => setHasToken(!!t));
+    db.meta.get(repoKey).then(m => {
+      if (m?.value) setRepo(m.value as string);
+    });
+  }, [tokenKey, repoKey]);
 
   const handleSaveConfig = async () => {
     if (token) {
-      await storeSecret('github:token', token);
+      await storeSecret(tokenKey, token);
       setHasToken(true);
       setToken('');
     }
-    await db.meta.put({ key: 'github:repo', value: repo });
+    await db.meta.put({ key: repoKey, value: repo });
     setConfigOpen(false);
     showToast('GitHub config saved', 'success');
   };
 
   const handleRemoveToken = async () => {
-    await deleteSecret('github:token');
+    await deleteSecret(tokenKey);
     setHasToken(false);
     showToast('Token removed');
   };
@@ -44,12 +56,12 @@ export function SyncPanel() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const storedToken = await getSecret('github:token');
+      const storedToken = await getSecret(tokenKey);
       if (!storedToken) {
         showToast('No GitHub token configured', 'error');
         return;
       }
-      const repoMeta = await db.meta.get('github:repo');
+      const repoMeta = await db.meta.get(repoKey);
       const repoName = (repoMeta?.value as string) ?? '';
       if (!repoName) {
         showToast('No repository configured', 'error');
@@ -62,7 +74,7 @@ export function SyncPanel() {
         repo: repoName,
       };
 
-      const syncPlan = await computeSyncPlan(config);
+      const syncPlan = await computeSyncPlan(config, projectId);
       setPlan(syncPlan);
       setDiffs([...syncPlan.diffs]);
 
@@ -95,7 +107,7 @@ export function SyncPanel() {
     if (!plan) return;
     setSyncing(true);
     try {
-      const { pulled, pushed, errors } = await executeSyncPlan(plan, diffs);
+      const { pulled, pushed, errors } = await executeSyncPlan(plan, diffs, projectId);
       setPreviewOpen(false);
       if (errors.length > 0) {
         showToast(`Sync partial: ${pulled} pulled, ${pushed} pushed, ${errors.length} errors`, 'error');
@@ -112,8 +124,6 @@ export function SyncPanel() {
   return (
     <>
       <div style={{
-        padding: '8px',
-        borderTop: '1px solid var(--border)',
         display: 'flex',
         gap: '6px',
         flexWrap: 'wrap',
@@ -159,7 +169,7 @@ export function SyncPanel() {
         </div>
         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
           Fine-grained PAT with Issues (read/write) and Metadata (read) permissions.
-          Tokens are encrypted in IndexedDB. This protects against casual disk inspection, not script injection.
+          Tokens are encrypted in IndexedDB.
         </p>
         <div className="form-actions">
           <button className="btn btn-secondary" onClick={() => setConfigOpen(false)}>Cancel</button>

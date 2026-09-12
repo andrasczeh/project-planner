@@ -19,6 +19,7 @@ import {
   deleteProject,
 } from '../commands';
 import { ProjectForm } from '../components/common/ProjectForm';
+import { SyncPanel } from '../components/sync/SyncPanel';
 import type { Task, Milestone as MilestoneType, ID } from '../types';
 
 interface Props {
@@ -176,7 +177,10 @@ export function ProjectView({ projectId, onDeleted }: Props) {
               + Dep
             </button>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{tasks.length} tasks</span>
+          <div className="toolbar">
+            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{tasks.length} tasks</span>
+            <SyncPanel projectId={projectId} />
+          </div>
         </div>
 
         {milestones.length > 0 && (

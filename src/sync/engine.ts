@@ -2,7 +2,7 @@ import { db } from '../db';
 import { generateId } from '../utils/id';
 import type { ProviderAdapter, SyncContext, RemoteOp, ProviderConfig } from './types';
 import { computeDiffs, applyResolutions, type RecordDiff } from './diff';
-import type { Task } from '../types';
+import type { Task, ID } from '../types';
 import { githubAdapter } from './adapters/github';
 
 const adapters: Record<string, ProviderAdapter> = {
@@ -19,7 +19,7 @@ export interface SyncPlan {
   config: ProviderConfig;
 }
 
-export async function computeSyncPlan(config: ProviderConfig): Promise<SyncPlan> {
+export async function computeSyncPlan(config: ProviderConfig, projectId?: ID): Promise<SyncPlan> {
   const adapter = adapters[config.provider];
   if (!adapter) throw new Error(`Unknown provider: ${config.provider}`);
 
@@ -44,7 +44,9 @@ export async function computeSyncPlan(config: ProviderConfig): Promise<SyncPlan>
     if (ref) {
       const localTask = await db.tasks.get(ref.localId);
       if (localTask) {
-        localRecords.set(rr.remoteId, localTask as unknown as Record<string, unknown>);
+        if (!projectId || localTask.projectId === projectId) {
+          localRecords.set(rr.remoteId, localTask as unknown as Record<string, unknown>);
+        }
       }
 
       const base = await db.syncBase.get(`${config.provider}:${rr.kind}:${rr.remoteId}`);
@@ -56,15 +58,17 @@ export async function computeSyncPlan(config: ProviderConfig): Promise<SyncPlan>
 
   const diffs = computeDiffs(baseSnapshots, localRecords, remoteMap, mappedFields, 'issue');
 
-  // Find local tasks that have no providerRef — these are new and should be pushed
-  const allTasks = await db.tasks.toArray();
   const linkedLocalIds = new Set<string>();
   const allRefs = await db.providerRefs.where('provider').equals(config.provider).toArray();
   for (const ref of allRefs) {
     linkedLocalIds.add(ref.localId);
   }
 
-  for (const task of allTasks) {
+  const projectTasks = projectId
+    ? await db.tasks.where('projectId').equals(projectId).toArray()
+    : await db.tasks.toArray();
+
+  for (const task of projectTasks) {
     if (linkedLocalIds.has(task.id)) continue;
     if (!task.title) continue;
 
@@ -94,7 +98,7 @@ export async function computeSyncPlan(config: ProviderConfig): Promise<SyncPlan>
   return { diffs, provider: config.provider, config };
 }
 
-export async function executeSyncPlan(plan: SyncPlan, confirmedDiffs: RecordDiff[]): Promise<{
+export async function executeSyncPlan(plan: SyncPlan, confirmedDiffs: RecordDiff[], projectId?: ID): Promise<{
   pulled: number;
   pushed: number;
   errors: string[];
@@ -128,7 +132,7 @@ export async function executeSyncPlan(plan: SyncPlan, confirmedDiffs: RecordDiff
         }
         const newTask: Task = {
           id: generateId(),
-          projectId: '',
+          projectId: projectId ?? '',
           title: (remoteData.title as string) ?? 'Untitled',
           body: (remoteData.body as string) ?? '',
           status: (remoteData.status as string) ?? 'todo',
