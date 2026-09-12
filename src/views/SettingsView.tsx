@@ -15,6 +15,7 @@ import { useToast } from '../components/common/Toast';
 import { Modal } from '../components/common/Modal';
 import { DeviceSync } from '../components/sync/DeviceSync';
 import { useSyncStatus } from '../hooks/useSyncStatus';
+import { APP_VERSION } from '../utils/version';
 
 export function SettingsView() {
   const { showToast } = useToast();
@@ -201,6 +202,10 @@ export function SettingsView() {
 
         <section>
           <h2 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>About</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span>Version</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{APP_VERSION}</span>
+          </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
             Project Planner — a browser-only, local-first project management tool.
             All data is stored in IndexedDB on your device.
