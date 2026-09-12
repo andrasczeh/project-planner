@@ -14,7 +14,7 @@ import { requestPersistentStorage, getStorageEstimate, db } from '../db';
 import { useToast } from '../components/common/Toast';
 import { Modal } from '../components/common/Modal';
 import { DeviceSync } from '../components/sync/DeviceSync';
-import { useSyncStatus } from '../hooks/useSyncStatus';
+import { useSyncDetails } from '../hooks/useSyncStatus';
 import { APP_VERSION } from '../utils/version';
 
 export function SettingsView() {
@@ -22,7 +22,8 @@ export function SettingsView() {
   const [persistent, setPersistent] = useState<boolean | null>(null);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [showDeviceSync, setShowDeviceSync] = useState(false);
-  const syncStatus = useSyncStatus();
+  const syncDetails = useSyncDetails();
+  const syncStatus = syncDetails.status;
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -136,9 +137,8 @@ export function SettingsView() {
           <h2 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>Device Sync</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '12px' }}>
             Sync your data with another device via peer-to-peer connection.
-            {syncStatus === 'connected' && ' Changes sync automatically while connected.'}
           </p>
-          <div className="toolbar">
+          <div className="toolbar" style={{ marginBottom: syncStatus !== 'disconnected' ? '12px' : undefined }}>
             <button className="btn btn-secondary" onClick={() => setShowDeviceSync(true)}>
               {syncStatus !== 'disconnected' ? 'Manage Sync' : 'Start Device Sync'}
             </button>
@@ -152,6 +152,22 @@ export function SettingsView() {
               <span className="badge" style={{ borderColor: 'var(--accent)' }}>Searching…</span>
             )}
           </div>
+          {syncStatus !== 'disconnected' && (
+            <div style={{
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '4px 12px',
+            }}>
+              {syncDetails.totalSent > 0 && <span>{syncDetails.totalSent} sent</span>}
+              {syncDetails.totalReceived > 0 && <span>{syncDetails.totalReceived} received</span>}
+              {syncDetails.pendingChanges > 0 && (
+                <span style={{ color: 'var(--accent)' }}>{syncDetails.pendingChanges} pending</span>
+              )}
+              {syncDetails.autoReconnect && <span>auto-reconnect on</span>}
+            </div>
+          )}
         </section>
 
         <section style={{ marginBottom: '32px' }}>

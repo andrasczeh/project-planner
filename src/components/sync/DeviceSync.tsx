@@ -8,7 +8,8 @@ import {
   applySyncOps,
   type DeviceSyncPayload,
 } from '../../sync/device-sync';
-import { SyncSession, getSession, isAutoReconnectEnabled } from '../../sync/session';
+import { SyncSession, getSession } from '../../sync/session';
+import { useSyncDetails } from '../../hooks/useSyncStatus';
 import { DiffPreview } from './DiffPreview';
 import type { RecordDiff } from '../../sync/diff';
 
@@ -296,12 +297,39 @@ function StatusMessage({ text }: { text: string }) {
   );
 }
 
+function formatDuration(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remainMins = mins % 60;
+  return remainMins > 0 ? `${hrs}h ${remainMins}m` : `${hrs}h`;
+}
+
+function formatTimeAgo(ts: number): string {
+  const ago = Date.now() - ts;
+  if (ago < 5000) return 'just now';
+  return `${formatDuration(ago)} ago`;
+}
+
+function StatusRow({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
+      <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{label}</span>
+      <span style={{ fontSize: '13px', fontWeight: 500, color: accent ?? 'var(--text-primary)' }}>{value}</span>
+    </div>
+  );
+}
+
 function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClose: () => void }) {
-  const [autoReconnect, setAutoReconnect] = useState<boolean | null>(null);
+  const details = useSyncDetails();
   const [toggling, setToggling] = useState(false);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
-    isAutoReconnectEnabled().then(setAutoReconnect);
+    const id = setInterval(() => setTick(t => t + 1), 5000);
+    return () => clearInterval(id);
   }, []);
 
   const handleToggle = async () => {
@@ -309,12 +337,10 @@ function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClo
     if (!session || toggling) return;
     setToggling(true);
     try {
-      if (autoReconnect) {
+      if (details.autoReconnect) {
         await session.disableAutoReconnect();
-        setAutoReconnect(false);
       } else {
         await session.enableAutoReconnect();
-        setAutoReconnect(true);
       }
     } catch (err) {
       console.error('Toggle auto-reconnect failed', err);
@@ -322,27 +348,56 @@ function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClo
     setToggling(false);
   };
 
+  const statusColor = details.status === 'connected' ? 'var(--success)'
+    : details.status === 'syncing' ? 'var(--accent)' : 'var(--text-muted)';
+
+  const statusLabel = details.status === 'syncing' ? 'Syncing…'
+    : details.status === 'connected' ? 'Connected' : 'Disconnected';
+
   return (
-    <div style={{ textAlign: 'center', padding: '32px 0' }}>
-      <div style={{
-        width: '48px',
-        height: '48px',
-        margin: '0 auto 16px',
-        borderRadius: '50%',
-        background: 'rgba(34,197,94,0.15)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6" />
-          <path d="M2.5 11.5a10 10 0 0 1 17.3-6.4L21.5 8M21.5 12.5a10 10 0 0 1-17.3 6.4L2.5 16" />
-        </svg>
+    <div style={{ padding: '24px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+        <div style={{
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          background: statusColor,
+          flexShrink: 0,
+          boxShadow: details.status === 'syncing' ? `0 0 8px ${statusColor}` : undefined,
+        }} />
+        <h3 style={{ margin: 0, flex: 1 }}>{statusLabel}</h3>
+        {details.pendingChanges > 0 && (
+          <span className="badge" style={{ borderColor: 'var(--accent)' }}>
+            {details.pendingChanges} pending
+          </span>
+        )}
       </div>
-      <h3>Auto-Sync Active</h3>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px' }}>
-        Changes sync automatically between devices.
-      </p>
+
+      <div style={{
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        padding: '12px',
+        marginBottom: '16px',
+      }}>
+        <StatusRow
+          label="Connection"
+          value={details.connectedSince ? `Up ${formatDuration(Date.now() - details.connectedSince)}` : 'Not connected'}
+          accent={details.connectedSince ? 'var(--success)' : 'var(--text-muted)'}
+        />
+        <StatusRow
+          label="Last activity"
+          value={details.lastSyncAt ? formatTimeAgo(details.lastSyncAt) : 'No activity yet'}
+        />
+        <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+        <StatusRow label="Sent" value={`${details.totalSent} change${details.totalSent !== 1 ? 's' : ''}`} />
+        <StatusRow label="Received" value={`${details.totalReceived} change${details.totalReceived !== 1 ? 's' : ''}`} />
+        <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+        <StatusRow
+          label="Auto-reconnect"
+          value={details.autoReconnect ? 'On' : 'Off'}
+          accent={details.autoReconnect ? 'var(--success)' : 'var(--text-muted)'}
+        />
+      </div>
 
       <label style={{
         display: 'flex',
@@ -357,9 +412,9 @@ function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClo
       }}>
         <input
           type="checkbox"
-          checked={autoReconnect ?? false}
+          checked={details.autoReconnect}
           onChange={handleToggle}
-          disabled={toggling || autoReconnect === null}
+          disabled={toggling}
           style={{ marginTop: '2px' }}
         />
         <div>

@@ -20,6 +20,16 @@ interface SyncChange {
 
 export type SessionStatus = 'connected' | 'syncing' | 'searching' | 'disconnected';
 
+export interface SyncDetails {
+  status: SessionStatus;
+  connectedSince: number | null;
+  lastSyncAt: number | null;
+  pendingChanges: number;
+  totalSent: number;
+  totalReceived: number;
+  autoReconnect: boolean;
+}
+
 const listeners = new Set<() => void>();
 let active: SyncSession | null = null;
 let trackerHandle: TrackerHandle | null = null;
@@ -80,6 +90,19 @@ export function getGlobalStatus(): SessionStatus {
   return _status;
 }
 
+export function getDetails(): SyncDetails {
+  if (active) return active.details;
+  return {
+    status: _status,
+    connectedSince: null,
+    lastSyncAt: null,
+    pendingChanges: 0,
+    totalSent: 0,
+    totalReceived: 0,
+    autoReconnect: false,
+  };
+}
+
 async function initSyncExchange(peer: SyncPeer, isHost: boolean): Promise<void> {
   _status = 'syncing';
   notify();
@@ -125,10 +148,18 @@ export class SyncSession {
   private timer: ReturnType<typeof setInterval> | null = null;
   private _status: SessionStatus = 'connected';
   private applying = false;
+  private _connectedSince = Date.now();
+  private _lastSyncAt: number | null = null;
+  private _pendingChanges = 0;
+  private _totalSent = 0;
+  private _totalReceived = 0;
+  private _autoReconnect = false;
 
   constructor(peer: SyncPeer, initialState: DeviceSyncPayload) {
     this.peer = peer;
     this.lastState = initialState;
+
+    isAutoReconnectEnabled().then(v => { this._autoReconnect = v; });
 
     peer.onStateChange = (state) => {
       if (state === 'closed' || state === 'failed') {
@@ -161,6 +192,18 @@ export class SyncSession {
     return this._status;
   }
 
+  get details(): SyncDetails {
+    return {
+      status: this._status,
+      connectedSince: this._connectedSince,
+      lastSyncAt: this._lastSyncAt,
+      pendingChanges: this._pendingChanges,
+      totalSent: this._totalSent,
+      totalReceived: this._totalReceived,
+      autoReconnect: this._autoReconnect,
+    };
+  }
+
   disconnect() {
     this.peer.close();
     this.stopTimer();
@@ -174,12 +217,16 @@ export class SyncSession {
     const roomCode = randomHex(20);
     await db.meta.put({ key: 'syncRoomCode', value: roomCode });
     await this.peer.send(JSON.stringify({ type: 'auto-reconnect', roomCode }));
+    this._autoReconnect = true;
+    notify();
     return roomCode;
   }
 
   async disableAutoReconnect(): Promise<void> {
     await db.meta.delete('syncRoomCode');
     await this.peer.send(JSON.stringify({ type: 'auto-reconnect-off' }));
+    this._autoReconnect = false;
+    notify();
   }
 
   private async storeRoomCode(roomCode: string) {
@@ -203,12 +250,20 @@ export class SyncSession {
     try {
       const current = await exportForSync();
       const changes = findChanges(this.lastState, current);
-      if (changes.length === 0) return;
+      this._pendingChanges = changes.length;
+
+      if (changes.length === 0) {
+        notify();
+        return;
+      }
 
       this._status = 'syncing';
       notify();
 
       await this.peer.send(JSON.stringify({ type: 'changes', changes }));
+      this._totalSent += changes.length;
+      this._lastSyncAt = Date.now();
+      this._pendingChanges = 0;
       this.lastState = current;
 
       this._status = 'connected';
@@ -229,7 +284,10 @@ export class SyncSession {
           else await tbl.delete(c.id);
         }
       });
+      this._totalReceived += changes.length;
+      this._lastSyncAt = Date.now();
       this.lastState = await exportForSync();
+      notify();
     } catch (err) {
       console.error('Apply incoming error', err);
     }
