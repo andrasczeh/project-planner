@@ -2,7 +2,10 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vite'
 
+const base = process.env.GITHUB_ACTIONS ? '/project-planner/' : '/';
+
 export default defineConfig({
+  base,
   server: {
     allowedHosts: ['amd-ai'],
   },
@@ -19,8 +22,8 @@ export default defineConfig({
         background_color: '#0f1117',
         display: 'standalone',
         orientation: 'any',
-        start_url: '/',
-        scope: '/',
+        start_url: base,
+        scope: base,
         icons: [
           {
             src: 'icon-72.png',
