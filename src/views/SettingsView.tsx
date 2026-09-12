@@ -14,12 +14,14 @@ import { requestPersistentStorage, getStorageEstimate, db } from '../db';
 import { useToast } from '../components/common/Toast';
 import { Modal } from '../components/common/Modal';
 import { DeviceSync } from '../components/sync/DeviceSync';
+import { useSyncStatus } from '../hooks/useSyncStatus';
 
 export function SettingsView() {
   const { showToast } = useToast();
   const [persistent, setPersistent] = useState<boolean | null>(null);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [showDeviceSync, setShowDeviceSync] = useState(false);
+  const syncStatus = useSyncStatus();
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -133,10 +135,19 @@ export function SettingsView() {
           <h2 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>Device Sync</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '12px' }}>
             Sync your data with another device on the same network via peer-to-peer connection.
+            {syncStatus === 'connected' && ' Changes sync automatically while connected.'}
           </p>
-          <button className="btn btn-secondary" onClick={() => setShowDeviceSync(true)}>
-            Start Device Sync
-          </button>
+          <div className="toolbar">
+            <button className="btn btn-secondary" onClick={() => setShowDeviceSync(true)}>
+              {syncStatus ? 'Manage Sync' : 'Start Device Sync'}
+            </button>
+            {syncStatus === 'connected' && (
+              <span className="badge" style={{ borderColor: 'var(--success)' }}>Active</span>
+            )}
+            {syncStatus === 'syncing' && (
+              <span className="badge" style={{ borderColor: 'var(--accent)' }}>Syncing</span>
+            )}
+          </div>
         </section>
 
         <section style={{ marginBottom: '32px' }}>

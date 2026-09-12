@@ -8,6 +8,7 @@ import {
   applySyncOps,
   type DeviceSyncPayload,
 } from '../../sync/device-sync';
+import { SyncSession, getSession } from '../../sync/session';
 import { DiffPreview } from './DiffPreview';
 import type { RecordDiff } from '../../sync/diff';
 
@@ -28,8 +29,7 @@ type SyncState =
   | { step: 'exchanging' }
   | { step: 'waiting-for-host' }
   | { step: 'reviewing'; diffs: RecordDiff[]; local: DeviceSyncPayload; remote: DeviceSyncPayload }
-  | { step: 'no-changes' }
-  | { step: 'done'; count: number }
+  | { step: 'active' }
   | { step: 'error'; message: string };
 
 interface Props {
@@ -37,15 +37,16 @@ interface Props {
 }
 
 export function DeviceSync({ onClose }: Props) {
-  const [state, setState] = useState<SyncState>({ step: 'choose' });
+  const [state, setState] = useState<SyncState>(() =>
+    getSession() ? { step: 'active' } : { step: 'choose' },
+  );
   const peerRef = useRef<SyncPeer | null>(null);
   const hostCtx = useRef<Awaited<ReturnType<typeof createHost>> | null>(null);
   const localDataRef = useRef<DeviceSyncPayload | null>(null);
-  const remoteDataRef = useRef<DeviceSyncPayload | null>(null);
   const roleRef = useRef<'host' | 'join'>('host');
 
   const cleanup = useCallback(() => {
-    peerRef.current?.close();
+    if (!getSession()) peerRef.current?.close();
     peerRef.current = null;
     hostCtx.current = null;
   }, []);
@@ -56,6 +57,12 @@ export function DeviceSync({ onClose }: Props) {
     cleanup();
     setState({ step: 'error', message: msg });
   }, [cleanup]);
+
+  const startSession = useCallback(async (peer: SyncPeer) => {
+    const currentData = await exportForSync();
+    new SyncSession(peer, currentData);
+    setState({ step: 'active' });
+  }, []);
 
   const onConnected = useCallback(async (peer: SyncPeer) => {
     peerRef.current = peer;
@@ -68,12 +75,11 @@ export function DeviceSync({ onClose }: Props) {
       try {
         const msg = JSON.parse(raw);
         if (msg.type === 'data') {
-          remoteDataRef.current = msg.payload as DeviceSyncPayload;
           if (roleRef.current === 'host') {
             const diffs = computeDeviceDiffs(localData, msg.payload);
             if (diffs.length === 0) {
               peer.send(JSON.stringify({ type: 'result', ops: { puts: [] } })).catch(() => {});
-              setState({ step: 'no-changes' });
+              startSession(peer);
             } else {
               setState({ step: 'reviewing', diffs, local: localData, remote: msg.payload });
             }
@@ -81,16 +87,12 @@ export function DeviceSync({ onClose }: Props) {
             setState({ step: 'waiting-for-host' });
           }
         } else if (msg.type === 'result') {
-          applySyncOps(msg.ops).then(count => {
+          applySyncOps(msg.ops).then(() => {
             peer.send(JSON.stringify({ type: 'done' })).catch(() => {});
-            if (count === 0 && msg.ops.puts.length === 0) {
-              setState({ step: 'no-changes' });
-            } else {
-              setState({ step: 'done', count });
-            }
+            startSession(peer);
           });
         } else if (msg.type === 'done') {
-          // Host received confirmation from joiner
+          // Host received confirmation — session already started in handleConfirm
         }
       } catch (err) {
         handleError(`Failed to process sync data: ${(err as Error).message}`);
@@ -100,7 +102,7 @@ export function DeviceSync({ onClose }: Props) {
     peer.send(JSON.stringify({ type: 'data', payload: localData })).catch(err => {
       handleError(`Failed to send data: ${(err as Error).message}`);
     });
-  }, [handleError]);
+  }, [handleError, startSession]);
 
   const startHost = useCallback(async () => {
     roleRef.current = 'host';
@@ -158,13 +160,10 @@ export function DeviceSync({ onClose }: Props) {
         ...diffs[di],
         fields: diffs[di].fields.map((f, i) => i === fi ? { ...f, resolution } : f),
       };
-      const hasConflicts = diffs.some(d => d.fields.some(f => !f.resolution));
-      if (!hasConflicts) {
-        for (const d of diffs) {
-          const allLocal = d.fields.every(f => f.resolution === 'local');
-          const allRemote = d.fields.every(f => f.resolution === 'remote');
-          d.status = allLocal ? 'push' : allRemote ? 'pull' : 'conflict';
-        }
+      for (const d of diffs) {
+        const allLocal = d.fields.every(f => f.resolution === 'local');
+        const allRemote = d.fields.every(f => f.resolution === 'remote');
+        d.status = allLocal ? 'push' : allRemote ? 'pull' : d.fields.some(f => !f.resolution) ? 'conflict' : 'conflict';
       }
       return { ...prev, diffs };
     });
@@ -175,24 +174,24 @@ export function DeviceSync({ onClose }: Props) {
     const { diffs, local, remote } = state;
     const { localOps, remoteOps } = resolveOps(diffs, local, remote);
 
-    const localCount = await applySyncOps(localOps);
+    await applySyncOps(localOps);
     const peer = peerRef.current;
     if (peer) {
       await peer.send(JSON.stringify({ type: 'result', ops: remoteOps }));
+      await startSession(peer);
     }
-    setState({ step: 'done', count: localCount + remoteOps.puts.length });
-  }, [state]);
+  }, [state, startSession]);
 
-  const handleClose = useCallback(() => {
-    cleanup();
-    onClose();
-  }, [cleanup, onClose]);
+  const handleDisconnect = useCallback(() => {
+    getSession()?.disconnect();
+    setState({ step: 'choose' });
+  }, []);
 
   return (
     <div style={{ padding: '20px', maxWidth: '500px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ margin: 0 }}>Device Sync</h2>
-        <button className="btn-icon" onClick={handleClose} aria-label="Close">
+        <button className="btn-icon" onClick={onClose} aria-label="Close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
@@ -203,9 +202,11 @@ export function DeviceSync({ onClose }: Props) {
         <ChooseStep onHost={startHost} onJoin={startJoin} />
       )}
 
-      {state.step === 'host-generating' && (
-        <StatusMessage text="Generating connection code..." />
-      )}
+      {state.step === 'host-generating' && <StatusMessage text="Generating connection code..." />}
+      {state.step === 'connecting' && <StatusMessage text="Connecting..." />}
+      {state.step === 'exchanging' && <StatusMessage text="Exchanging data..." />}
+      {state.step === 'waiting-for-host' && <StatusMessage text="Waiting for host to review changes..." />}
+      {state.step === 'join-generating' && <StatusMessage text="Generating answer..." />}
 
       {state.step === 'host-offer' && (
         <HostOfferStep
@@ -230,55 +231,21 @@ export function DeviceSync({ onClose }: Props) {
         <ScanStep label="Scan the QR code on the host device" onScan={joinWithOffer} onBack={() => setState({ step: 'choose' })} />
       )}
 
-      {state.step === 'join-generating' && (
-        <StatusMessage text="Generating answer..." />
-      )}
-
       {state.step === 'join-answer' && (
         <JoinAnswerStep qrUrl={state.qrUrl} signal={state.signal} />
       )}
 
-      {state.step === 'connecting' && (
-        <StatusMessage text="Connecting..." />
-      )}
-
-      {state.step === 'exchanging' && (
-        <StatusMessage text="Exchanging data..." />
-      )}
-
-      {state.step === 'waiting-for-host' && (
-        <StatusMessage text="Waiting for host to review changes..." />
-      )}
-
       {state.step === 'reviewing' && (
-        <div>
-          <DiffPreview
-            diffs={state.diffs}
-            onResolve={handleResolve}
-            onConfirm={handleConfirm}
-            onCancel={handleClose}
-          />
-        </div>
+        <DiffPreview
+          diffs={state.diffs}
+          onResolve={handleResolve}
+          onConfirm={handleConfirm}
+          onCancel={onClose}
+        />
       )}
 
-      {state.step === 'no-changes' && (
-        <div style={{ textAlign: 'center', padding: '32px 0' }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#10003;</div>
-          <h3>Already in sync</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>Both devices have the same data.</p>
-          <button className="btn btn-primary" onClick={handleClose}>Done</button>
-        </div>
-      )}
-
-      {state.step === 'done' && (
-        <div style={{ textAlign: 'center', padding: '32px 0' }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#10003;</div>
-          <h3>Sync Complete</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
-            {state.count} {state.count === 1 ? 'record' : 'records'} synchronized.
-          </p>
-          <button className="btn btn-primary" onClick={handleClose}>Done</button>
-        </div>
+      {state.step === 'active' && (
+        <ActiveStep onDisconnect={handleDisconnect} onClose={onClose} />
       )}
 
       {state.step === 'error' && (
@@ -288,7 +255,7 @@ export function DeviceSync({ onClose }: Props) {
           <p style={{ color: 'var(--danger)', marginBottom: '16px' }}>{state.message}</p>
           <div className="toolbar" style={{ justifyContent: 'center' }}>
             <button className="btn btn-secondary" onClick={() => setState({ step: 'choose' })}>Try Again</button>
-            <button className="btn btn-secondary" onClick={handleClose}>Close</button>
+            <button className="btn btn-secondary" onClick={onClose}>Close</button>
           </div>
         </div>
       )}
@@ -302,6 +269,7 @@ function ChooseStep({ onHost, onJoin }: { onHost: () => void; onJoin: () => void
       <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px' }}>
         Sync data between two devices on the same network.
         One device hosts the session, the other joins by scanning a QR code.
+        After pairing, changes sync automatically.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <button className="btn btn-primary" onClick={onHost} style={{ padding: '16px' }}>
@@ -324,6 +292,41 @@ function StatusMessage({ text }: { text: string }) {
     <div style={{ textAlign: 'center', padding: '40px 0' }}>
       <div className="spinner" style={{ margin: '0 auto 12px' }} />
       <p style={{ color: 'var(--text-secondary)' }}>{text}</p>
+    </div>
+  );
+}
+
+function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClose: () => void }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '32px 0' }}>
+      <div style={{
+        width: '48px',
+        height: '48px',
+        margin: '0 auto 16px',
+        borderRadius: '50%',
+        background: 'rgba(34,197,94,0.15)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6" />
+          <path d="M2.5 11.5a10 10 0 0 1 17.3-6.4L21.5 8M21.5 12.5a10 10 0 0 1-17.3 6.4L2.5 16" />
+        </svg>
+      </div>
+      <h3>Auto-Sync Active</h3>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '13px' }}>
+        Changes are syncing automatically between devices.
+        You can close this dialog — sync continues in the background.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <button className="btn btn-primary" onClick={onClose}>
+          Done
+        </button>
+        <button className="btn btn-danger" onClick={onDisconnect}>
+          Disconnect
+        </button>
+      </div>
     </div>
   );
 }

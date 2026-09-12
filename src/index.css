@@ -704,6 +704,17 @@ td:first-child {
   to { transform: rotate(360deg); }
 }
 
+.sync-indicator {
+  display: flex;
+  align-items: center;
+  color: var(--success);
+  margin-left: 4px;
+}
+
+.sync-indicator.syncing {
+  animation: spin 1.5s linear infinite;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

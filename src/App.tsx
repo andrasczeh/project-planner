@@ -11,6 +11,7 @@ import { SettingsView } from './views/SettingsView';
 import { createProject } from './commands';
 import { requestPersistentStorage } from './db';
 import { useUndoRedo } from './hooks/useUndoRedo';
+import { useSyncStatus } from './hooks/useSyncStatus';
 import { useProject } from './hooks/useProjects';
 import type { ID } from './types';
 
@@ -21,6 +22,7 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const activeProject = useProject(activeProjectId);
   const { performUndo, performRedo, canUndo, canRedo } = useUndoRedo();
+  const syncStatus = useSyncStatus();
 
   const mobileTitle = activeView === 'project' && activeProject
     ? activeProject.name
@@ -114,6 +116,17 @@ function AppContent() {
               <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
             </svg>
           </button>
+          {syncStatus && (
+            <span
+              className={`sync-indicator${syncStatus === 'syncing' ? ' syncing' : ''}`}
+              title={syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'connected' ? 'Sync active' : 'Disconnected'}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6" />
+                <path d="M2.5 11.5a10 10 0 0 1 17.3-6.4L21.5 8M21.5 12.5a10 10 0 0 1-17.3 6.4L2.5 16" />
+              </svg>
+            </span>
+          )}
         </div>
       </div>
 
