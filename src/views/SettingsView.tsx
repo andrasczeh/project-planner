@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { exportBackup, importBackup, downloadJson, wipeAllData, type BackupData } from '../utils/backup';
 import { requestPersistentStorage, getStorageEstimate } from '../db';
 import { useToast } from '../components/common/Toast';
+import { SyncPanel } from '../components/sync/SyncPanel';
 
 export function SettingsView() {
   const { showToast } = useToast();
@@ -94,6 +95,14 @@ export function SettingsView() {
             <button className="btn btn-secondary" onClick={handleExport}>Export JSON Backup</button>
             <button className="btn btn-secondary" onClick={handleImport}>Import Backup</button>
           </div>
+        </section>
+
+        <section style={{ marginBottom: '32px' }}>
+          <h2 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>GitHub Sync</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '12px' }}>
+            Sync tasks with GitHub Issues. Configure a repo and personal access token to pull issues in and push changes back.
+          </p>
+          <SyncPanel />
         </section>
 
         <section style={{ marginBottom: '32px' }}>
