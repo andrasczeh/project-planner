@@ -44,6 +44,7 @@ export function subscribeSession(fn: () => void): () => void {
 }
 
 function notify() {
+  updateCachedDetails();
   listeners.forEach(fn => fn());
 }
 
@@ -90,9 +91,18 @@ export function getGlobalStatus(): SessionStatus {
   return _status;
 }
 
-export function getDetails(): SyncDetails {
-  if (active) return active.details;
-  return {
+let _cachedDetails: SyncDetails = {
+  status: 'disconnected',
+  connectedSince: null,
+  lastSyncAt: null,
+  pendingChanges: 0,
+  totalSent: 0,
+  totalReceived: 0,
+  autoReconnect: false,
+};
+
+function updateCachedDetails(): void {
+  const next = active ? active.details : {
     status: _status,
     connectedSince: null,
     lastSyncAt: null,
@@ -101,6 +111,21 @@ export function getDetails(): SyncDetails {
     totalReceived: 0,
     autoReconnect: false,
   };
+  if (
+    _cachedDetails.status !== next.status ||
+    _cachedDetails.connectedSince !== next.connectedSince ||
+    _cachedDetails.lastSyncAt !== next.lastSyncAt ||
+    _cachedDetails.pendingChanges !== next.pendingChanges ||
+    _cachedDetails.totalSent !== next.totalSent ||
+    _cachedDetails.totalReceived !== next.totalReceived ||
+    _cachedDetails.autoReconnect !== next.autoReconnect
+  ) {
+    _cachedDetails = next;
+  }
+}
+
+export function getDetails(): SyncDetails {
+  return _cachedDetails;
 }
 
 async function initSyncExchange(peer: SyncPeer, isHost: boolean): Promise<void> {

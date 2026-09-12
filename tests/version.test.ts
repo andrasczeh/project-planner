@@ -72,6 +72,10 @@ describe('APP_VERSION', () => {
 });
 
 describe('checkForUpdate', () => {
+  const parsed = parseVersion(APP_VERSION)!;
+  const newerVersion = `${parsed.core[0]}.${parsed.core[1] + 1}.0`;
+  const evenNewerVersion = `${parsed.core[0]}.${parsed.core[1] + 2}.0`;
+
   function mockRelease(body: unknown, ok = true) {
     const fetchMock = vi.fn().mockResolvedValue({
       ok,
@@ -87,9 +91,9 @@ describe('checkForUpdate', () => {
   });
 
   it('offers a release newer than the running version', async () => {
-    mockRelease({ tag_name: 'v1.1.0', html_url: 'https://example.test/r' });
+    mockRelease({ tag_name: `v${newerVersion}`, html_url: 'https://example.test/r' });
     const release = await checkForUpdate();
-    expect(release).toEqual({ version: '1.1.0', url: 'https://example.test/r' });
+    expect(release).toEqual({ version: newerVersion, url: 'https://example.test/r' });
   });
 
   it('returns null when the latest release is the running version', async () => {
@@ -103,20 +107,20 @@ describe('checkForUpdate', () => {
   });
 
   it('returns null once that version has been dismissed', async () => {
-    mockRelease({ tag_name: 'v1.1.0' });
+    mockRelease({ tag_name: `v${newerVersion}` });
     expect(await checkForUpdate()).not.toBeNull();
-    dismissVersion('1.1.0');
+    dismissVersion(newerVersion);
     expect(await checkForUpdate()).toBeNull();
   });
 
   it('still offers a newer release after dismissing an older one', async () => {
-    dismissVersion('1.1.0');
-    mockRelease({ tag_name: 'v1.2.0' });
+    dismissVersion(newerVersion);
+    mockRelease({ tag_name: `v${evenNewerVersion}` });
     expect(await checkForUpdate()).not.toBeNull();
   });
 
   it('serves a cached result instead of refetching inside the TTL', async () => {
-    const fetchMock = mockRelease({ tag_name: 'v1.1.0' });
+    const fetchMock = mockRelease({ tag_name: `v${newerVersion}` });
     await checkForUpdate();
     await checkForUpdate();
     expect(fetchMock).toHaveBeenCalledTimes(1);
