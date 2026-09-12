@@ -56,6 +56,41 @@ export async function computeSyncPlan(config: ProviderConfig): Promise<SyncPlan>
 
   const diffs = computeDiffs(baseSnapshots, localRecords, remoteMap, mappedFields, 'issue');
 
+  // Find local tasks that have no providerRef — these are new and should be pushed
+  const allTasks = await db.tasks.toArray();
+  const linkedLocalIds = new Set<string>();
+  const allRefs = await db.providerRefs.where('provider').equals(config.provider).toArray();
+  for (const ref of allRefs) {
+    linkedLocalIds.add(ref.localId);
+  }
+
+  for (const task of allTasks) {
+    if (linkedLocalIds.has(task.id)) continue;
+    if (!task.title) continue;
+
+    const canonical: Record<string, unknown> = {
+      title: task.title,
+      body: task.body ?? '',
+      status: task.status ?? 'todo',
+      labels: task.labels ?? [],
+    };
+
+    diffs.push({
+      id: task.id,
+      kind: 'issue',
+      status: 'push',
+      fields: mappedFields
+        .filter(f => canonical[f] !== undefined)
+        .map(f => ({
+          field: f,
+          base: undefined,
+          local: canonical[f],
+          remote: undefined,
+          resolution: 'local' as const,
+        })),
+    });
+  }
+
   return { diffs, provider: config.provider, config };
 }
 
@@ -121,7 +156,10 @@ export async function executeSyncPlan(plan: SyncPlan, confirmedDiffs: RecordDiff
 
     if (diff.status === 'push' || diff.fields.some(f => f.resolution === 'local')) {
       const ref = await db.providerRefs.get([plan.provider, diff.kind, diff.id]);
-      const localTask = ref ? await db.tasks.get(ref.localId) : null;
+      let localTask = ref ? await db.tasks.get(ref.localId) : null;
+      if (!localTask) {
+        localTask = await db.tasks.get(diff.id) ?? null;
+      }
       if (localTask) {
         const patch = adapter.fromCanonical(localTask);
         pushOps.push({
@@ -129,7 +167,7 @@ export async function executeSyncPlan(plan: SyncPlan, confirmedDiffs: RecordDiff
           kind: 'issue',
           localId: localTask.id,
           remoteId: ref?.remoteId,
-          data: { ...patch.data, number: ref?.remoteNumber },
+          data: { ...patch.data, ...(ref?.remoteNumber ? { number: ref.remoteNumber } : {}) },
         });
       }
     }
