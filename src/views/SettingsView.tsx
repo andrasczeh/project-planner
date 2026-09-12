@@ -134,18 +134,21 @@ export function SettingsView() {
         <section style={{ marginBottom: '32px' }}>
           <h2 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>Device Sync</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '12px' }}>
-            Sync your data with another device on the same network via peer-to-peer connection.
+            Sync your data with another device via peer-to-peer connection.
             {syncStatus === 'connected' && ' Changes sync automatically while connected.'}
           </p>
           <div className="toolbar">
             <button className="btn btn-secondary" onClick={() => setShowDeviceSync(true)}>
-              {syncStatus ? 'Manage Sync' : 'Start Device Sync'}
+              {syncStatus !== 'disconnected' ? 'Manage Sync' : 'Start Device Sync'}
             </button>
             {syncStatus === 'connected' && (
               <span className="badge" style={{ borderColor: 'var(--success)' }}>Active</span>
             )}
             {syncStatus === 'syncing' && (
               <span className="badge" style={{ borderColor: 'var(--accent)' }}>Syncing</span>
+            )}
+            {syncStatus === 'searching' && (
+              <span className="badge" style={{ borderColor: 'var(--accent)' }}>Searching…</span>
             )}
           </div>
         </section>

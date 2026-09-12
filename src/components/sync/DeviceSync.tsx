@@ -8,7 +8,7 @@ import {
   applySyncOps,
   type DeviceSyncPayload,
 } from '../../sync/device-sync';
-import { SyncSession, getSession } from '../../sync/session';
+import { SyncSession, getSession, isAutoReconnectEnabled } from '../../sync/session';
 import { DiffPreview } from './DiffPreview';
 import type { RecordDiff } from '../../sync/diff';
 
@@ -297,6 +297,31 @@ function StatusMessage({ text }: { text: string }) {
 }
 
 function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClose: () => void }) {
+  const [autoReconnect, setAutoReconnect] = useState<boolean | null>(null);
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    isAutoReconnectEnabled().then(setAutoReconnect);
+  }, []);
+
+  const handleToggle = async () => {
+    const session = getSession();
+    if (!session || toggling) return;
+    setToggling(true);
+    try {
+      if (autoReconnect) {
+        await session.disableAutoReconnect();
+        setAutoReconnect(false);
+      } else {
+        await session.enableAutoReconnect();
+        setAutoReconnect(true);
+      }
+    } catch (err) {
+      console.error('Toggle auto-reconnect failed', err);
+    }
+    setToggling(false);
+  };
+
   return (
     <div style={{ textAlign: 'center', padding: '32px 0' }}>
       <div style={{
@@ -315,17 +340,40 @@ function ActiveStep({ onDisconnect, onClose }: { onDisconnect: () => void; onClo
         </svg>
       </div>
       <h3>Auto-Sync Active</h3>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '13px' }}>
-        Changes are syncing automatically between devices.
-        You can close this dialog — sync continues in the background.
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px' }}>
+        Changes sync automatically between devices.
       </p>
+
+      <label style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '10px',
+        textAlign: 'left',
+        padding: '12px',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        marginBottom: '20px',
+        cursor: 'pointer',
+      }}>
+        <input
+          type="checkbox"
+          checked={autoReconnect ?? false}
+          onChange={handleToggle}
+          disabled={toggling || autoReconnect === null}
+          style={{ marginTop: '2px' }}
+        />
+        <div>
+          <strong style={{ fontSize: '13px' }}>Stay connected</strong>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', margin: '4px 0 0' }}>
+            Reconnect automatically when you reopen the app.
+            Uses a public relay for discovery only — your data stays peer-to-peer.
+          </p>
+        </div>
+      </label>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <button className="btn btn-primary" onClick={onClose}>
-          Done
-        </button>
-        <button className="btn btn-danger" onClick={onDisconnect}>
-          Disconnect
-        </button>
+        <button className="btn btn-primary" onClick={onClose}>Done</button>
+        <button className="btn btn-danger" onClick={onDisconnect}>Disconnect</button>
       </div>
     </div>
   );

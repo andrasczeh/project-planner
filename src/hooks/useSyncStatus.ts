@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react';
-import { getSession, subscribeSession, type SessionStatus } from '../sync/session';
+import { getGlobalStatus, subscribeSession, type SessionStatus } from '../sync/session';
 
-export function useSyncStatus(): SessionStatus | null {
+export function useSyncStatus(): SessionStatus {
   return useSyncExternalStore(
     subscribeSession,
-    () => getSession()?.status ?? null,
+    getGlobalStatus,
   );
 }

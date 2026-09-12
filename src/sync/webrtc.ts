@@ -84,7 +84,7 @@ function setupReceiver(dc: RTCDataChannel, onComplete: (data: string) => void): 
   };
 }
 
-function makePeer(pc: RTCPeerConnection): SyncPeer {
+export function makePeer(pc: RTCPeerConnection): SyncPeer {
   const peer: SyncPeer = {
     onMessage: null,
     onStateChange: null,
@@ -99,7 +99,7 @@ function makePeer(pc: RTCPeerConnection): SyncPeer {
   return peer;
 }
 
-function wireDC(dc: RTCDataChannel, peer: SyncPeer): void {
+export function wireDC(dc: RTCDataChannel, peer: SyncPeer): void {
   setupReceiver(dc, (data) => peer.onMessage?.(data));
   peer.send = (data: string) => sendChunked(dc, data);
   dc.onopen = () => { peer.state = 'open'; peer.onStateChange?.('open'); };
