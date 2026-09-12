@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Task, Dependency, ID } from '../../types';
 import { parseDate, addDays, formatDate, diffDays, monthLabel, weekLabel } from '../../utils/dates';
-import { updateTask } from '../../commands';
+import { updateTask, beginTxn, endTxn } from '../../commands';
 
 type ZoomLevel = 'day' | 'week' | 'month';
 
@@ -102,12 +102,14 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
       longPressTimer.current = setTimeout(() => {
         if (!pendingDrag.current) return;
         const pd = pendingDrag.current;
+        beginTxn();
         setDragging({ taskId: pd.taskId, mode: pd.mode, startX: pd.startX, origStart: pd.origStart, origEnd: pd.origEnd });
         setDragDates({ start: pd.origStart, end: pd.origEnd, x: pd.startX, y: 0 });
         if (navigator.vibrate) navigator.vibrate(30);
         pendingDrag.current = null;
       }, 400);
     } else {
+      beginTxn();
       setDragging({ taskId: task.id, mode, startX: e.clientX, origStart: task.start, origEnd: task.end });
       setDragDates({ start: task.start, end: task.end, x: e.clientX, y: e.clientY });
     }
@@ -150,6 +152,7 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
     };
 
     const handlePointerUp = () => {
+      endTxn();
       setDragging(null);
       setDragDates(null);
     };

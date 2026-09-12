@@ -1,40 +1,41 @@
-import { useState, useCallback, useEffect } from 'react';
-import { undo } from '../commands';
+import { useCallback, useEffect, useState } from 'react';
+import { liveQuery } from 'dexie';
+import { undo, redo } from '../commands';
 import { db } from '../db';
-import type { OpLogEntry } from '../types';
 
 export function useUndoRedo() {
-  const [redoStack, setRedoStack] = useState<OpLogEntry[]>([]);
   const [canUndo, setCanUndo] = useState(false);
-
-  const checkCanUndo = useCallback(async () => {
-    const count = await db.oplog.count();
-    setCanUndo(count > 0);
-  }, []);
+  const [canRedo, setCanRedo] = useState(false);
 
   useEffect(() => {
-    checkCanUndo();
-  }, [checkCanUndo]);
+    const sub = liveQuery(async () => {
+      const [applied, undone] = await Promise.all([
+        db.oplog.where('undone').equals(0).count(),
+        db.oplog.where('undone').equals(1).count(),
+      ]);
+      return { applied, undone };
+    }).subscribe(({ applied, undone }) => {
+      setCanUndo(applied > 0);
+      setCanRedo(undone > 0);
+    });
+    return () => sub.unsubscribe();
+  }, []);
 
-  const performUndo = useCallback(async () => {
-    const entry = await undo();
-    if (entry) {
-      setRedoStack(prev => [...prev, entry]);
-    }
-    await checkCanUndo();
-    return entry;
-  }, [checkCanUndo]);
+  const performUndo = useCallback(() => undo(), []);
+  const performRedo = useCallback(() => redo(), []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        performUndo();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
+      const target = e.target as HTMLElement | null;
+      if (target?.matches('input, textarea, select')) return;
+      e.preventDefault();
+      if (e.shiftKey) performRedo();
+      else performUndo();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [performUndo]);
+  }, [performUndo, performRedo]);
 
-  return { performUndo, canUndo, redoStack };
+  return { performUndo, performRedo, canUndo, canRedo };
 }

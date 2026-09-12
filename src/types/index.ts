@@ -83,13 +83,31 @@ export interface SyncBase {
 
 export interface OpLogEntry {
   seq?: number;
+  txnId: string;
   entity: string;
   id: ID;
   op: 'put' | 'delete';
+  /** Hard deletes remove the row entirely; `before` holds the full record. */
+  hard?: boolean;
   fields: string[];
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
+  deviceId: string;
+  lamport: number;
   at: number;
+  /** 0 = applied, 1 = undone and available for redo. Numeric because IndexedDB cannot index booleans. */
+  undone: 0 | 1;
+}
+
+export interface Snapshot {
+  id: ID;
+  label: string;
+  createdAt: number;
+  auto: boolean;
+  /** Gzipped JSON when the browser supports CompressionStream, else plain JSON text. */
+  payload: Blob;
+  compressed: boolean;
+  bytes: number;
 }
 
 export interface SecretEntry {
