@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { generateId } from '../utils/id';
 import type {
   Project,
   Task,
@@ -52,13 +53,19 @@ export class ProjectPlannerDB extends Dexie {
       })
       .upgrade(async tx => {
         // Pre-v2 entries predate transaction grouping: give each its own txn so
-        // they stay individually undoable under the new model.
-        await tx.table('oplog').toCollection().modify((entry: OpLogEntry) => {
-          entry.txnId ??= `legacy-${entry.seq}`;
-          entry.deviceId ??= 'legacy';
-          entry.lamport ??= entry.seq ?? 0;
-          entry.undone ??= 0;
-        });
+        // they stay individually undoable under the new model. A malformed row
+        // must not fail the upgrade and lock the user out of their data.
+        try {
+          await tx.table('oplog').toCollection().modify((entry: OpLogEntry) => {
+            entry.txnId ??= `legacy-${entry.seq}`;
+            entry.deviceId ??= 'legacy';
+            entry.lamport ??= entry.seq ?? 0;
+            entry.undone ??= 0;
+          });
+        } catch (err) {
+          console.error('Could not backfill oplog; clearing undo history', err);
+          await tx.table('oplog').clear();
+        }
       });
   }
 }
@@ -74,7 +81,7 @@ export async function getDeviceId(): Promise<string> {
     cachedDeviceId = existing.value as string;
     return cachedDeviceId;
   }
-  const id = crypto.randomUUID();
+  const id = generateId();
   await db.meta.put({ key: 'deviceId', value: id });
   cachedDeviceId = id;
   return id;

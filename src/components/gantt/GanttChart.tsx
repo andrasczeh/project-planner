@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Task, Dependency, ID } from '../../types';
 import { parseDate, addDays, formatDate, diffDays, monthLabel, weekLabel } from '../../utils/dates';
-import { updateTask, beginTxn, endTxn } from '../../commands';
+import { updateTask } from '../../commands';
 
 type ZoomLevel = 'day' | 'week' | 'month';
 
@@ -102,14 +102,12 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
       longPressTimer.current = setTimeout(() => {
         if (!pendingDrag.current) return;
         const pd = pendingDrag.current;
-        beginTxn();
         setDragging({ taskId: pd.taskId, mode: pd.mode, startX: pd.startX, origStart: pd.origStart, origEnd: pd.origEnd });
         setDragDates({ start: pd.origStart, end: pd.origEnd, x: pd.startX, y: 0 });
         if (navigator.vibrate) navigator.vibrate(30);
         pendingDrag.current = null;
       }, 400);
     } else {
-      beginTxn();
       setDragging({ taskId: task.id, mode, startX: e.clientX, origStart: task.start, origEnd: task.end });
       setDragDates({ start: task.start, end: task.end, x: e.clientX, y: e.clientY });
     }
@@ -127,32 +125,33 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
   useEffect(() => {
     if (!dragging) return;
 
-    const handlePointerMove = (e: PointerEvent) => {
-      const dx = e.clientX - dragging.startX;
-      const daysDelta = Math.round(dx / config.dayWidth);
-
-      const task = tasks.find(t => t.id === dragging.taskId);
-      if (!task) return;
-
-      let newStart: string, newEnd: string;
+    // The drag only previews; nothing is written until the pointer is released,
+    // so a whole drag is one database write and one undo step.
+    const datesAt = (clientX: number) => {
+      const daysDelta = Math.round((clientX - dragging.startX) / config.dayWidth);
       if (dragging.mode === 'move') {
-        newStart = formatDate(addDays(parseDate(dragging.origStart), daysDelta));
-        newEnd = formatDate(addDays(parseDate(dragging.origEnd), daysDelta));
-        updateTask(task.id, { start: newStart, end: newEnd });
-      } else {
-        newStart = dragging.origStart;
-        newEnd = formatDate(addDays(parseDate(dragging.origEnd), daysDelta));
-        if (parseDate(newEnd) > parseDate(dragging.origStart)) {
-          updateTask(task.id, { end: newEnd });
-        } else {
-          newEnd = task.end || dragging.origEnd;
-        }
+        return {
+          start: formatDate(addDays(parseDate(dragging.origStart), daysDelta)),
+          end: formatDate(addDays(parseDate(dragging.origEnd), daysDelta)),
+        };
       }
-      setDragDates({ start: newStart, end: newEnd, x: e.clientX, y: e.clientY });
+      const end = formatDate(addDays(parseDate(dragging.origEnd), daysDelta));
+      return {
+        start: dragging.origStart,
+        end: parseDate(end) < parseDate(dragging.origStart) ? dragging.origStart : end,
+      };
     };
 
-    const handlePointerUp = () => {
-      endTxn();
+    const handlePointerMove = (e: PointerEvent) => {
+      const { start, end } = datesAt(e.clientX);
+      setDragDates({ start, end, x: e.clientX, y: e.clientY });
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      const { start, end } = datesAt(e.clientX);
+      if (start !== dragging.origStart || end !== dragging.origEnd) {
+        updateTask(dragging.taskId, { start, end });
+      }
       setDragging(null);
       setDragDates(null);
     };
@@ -163,7 +162,7 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [dragging, config.dayWidth, tasks]);
+  }, [dragging, config.dayWidth]);
 
   const renderHeader = () => {
     const headers: { x: number; width: number; label: string }[] = [];
@@ -294,8 +293,15 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
   const renderBars = () => {
     return sortedTasks.map(({ task }, idx) => {
       if (!task.start || !task.end) return null;
-      const x = getBarX(task.start);
-      const days = diffDays(parseDate(task.start), parseDate(task.end)) + 1;
+
+      // While dragging, the bar follows the pointer from local state; the task
+      // record itself is untouched until release.
+      const isDragging = dragging?.taskId === task.id;
+      const start = isDragging && dragDates ? dragDates.start : task.start;
+      const end = isDragging && dragDates ? dragDates.end : task.end;
+
+      const x = getBarX(start);
+      const days = diffDays(parseDate(start), parseDate(end)) + 1;
       const width = Math.max(days * config.dayWidth, MIN_BAR_WIDTH);
       const y = HEADER_HEIGHT + idx * ROW_HEIGHT + BAR_Y_OFFSET;
 
@@ -315,7 +321,6 @@ export function GanttChart({ tasks, dependencies, onEditTask }: Props) {
       }
 
       const progress = task.status === 'done' ? 1 : task.status === 'in-progress' ? 0.5 : 0;
-      const isDragging = dragging?.taskId === task.id;
 
       return (
         <g key={task.id} style={isDragging ? { filter: 'drop-shadow(0 2px 8px rgba(91,141,239,0.5))' } : undefined}>

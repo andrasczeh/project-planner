@@ -112,7 +112,7 @@ describe('undo/redo', () => {
     const task = await makeTask(project.id, 'Drag me');
     await updateTask(task.id, { start: '2026-01-01', end: '2026-01-05' });
 
-    // Mimic a Gantt drag: many updates between beginTxn and endTxn.
+    // Any multi-step action wrapped in a transaction collapses to one undo step.
     beginTxn();
     for (let day = 2; day <= 20; day++) {
       const d = String(day).padStart(2, '0');

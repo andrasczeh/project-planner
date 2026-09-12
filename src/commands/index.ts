@@ -31,14 +31,20 @@ let lamportCounter = 0;
 let openTxn: { id: string; buffer: Map<string, OpLogEntry> } | null = null;
 
 export async function initCommands(): Promise<void> {
-  deviceId = await getDeviceId();
-  const stored = await db.meta.get('lamport');
-  lamportCounter = (stored?.value as number) ?? 0;
+  // Degrade rather than block startup: undo/redo still works without these,
+  // they only matter for attributing ops to a device during sync.
+  try {
+    deviceId = await getDeviceId();
+    const stored = await db.meta.get('lamport');
+    lamportCounter = (stored?.value as number) ?? 0;
+  } catch (err) {
+    console.error('Could not load device identity', err);
+  }
 }
 
 export function beginTxn(): string {
   if (openTxn) return openTxn.id;
-  openTxn = { id: crypto.randomUUID(), buffer: new Map() };
+  openTxn = { id: generateId(), buffer: new Map() };
   return openTxn.id;
 }
 
@@ -107,7 +113,7 @@ function newEntry(
 ): OpLogEntry {
   lamportCounter += 1;
   return {
-    txnId: openTxn?.id ?? crypto.randomUUID(),
+    txnId: openTxn?.id ?? generateId(),
     entity,
     id,
     op,
