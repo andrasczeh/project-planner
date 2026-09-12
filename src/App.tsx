@@ -3,6 +3,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { ToastProvider } from './components/common/Toast';
 import { Modal } from './components/common/Modal';
 import { ProjectForm } from './components/common/ProjectForm';
+import { InstallPrompt } from './components/common/InstallPrompt';
 import { ProjectView } from './views/ProjectView';
 import { GanttView } from './views/GanttView';
 import { PersonViewPage } from './components/person/PersonView';
@@ -123,6 +124,8 @@ function AppContent() {
           onCancel={() => setShowNewProject(false)}
         />
       </Modal>
+
+      <InstallPrompt />
     </div>
   );
 }
